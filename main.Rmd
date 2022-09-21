@@ -1,0 +1,149 @@
+---
+title: "Section 5 MatchAlign"
+output: html_document
+date: '2022-06-24'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Data
+
+We load the main packages, including the R package *infinitefactor* that we developed. 
+
+```{r, message=FALSE}
+set.seed(1)
+library(tidyverse)
+library(infinitefactor)
+library(coda)
+library(factor.switching)
+source("helper_fcts.R")
+```
+
+In this application, we use data from the National Health and Nutrition Examination Survey (NHANES) collected in 2015 and 2016. We select a subset of $107$ chemical exposures for which at least $30\%$ of measurements have been recorded (i.e., are not missing). We also select a subsample of $4468$ individuals for which at least $30\%$ of the $107$ chemicals have been recorded. After this preprocessing step, we are left with a matrix $X$ of dimension $4468 \times 107$ with $36\%$ missing data.
+
+
+```{r}
+# df_chem from Rds
+df <- readRDS("data/df_chem_06_24.rds")
+dim(df)
+```
+
+```{r}
+head(df)
+```
+
+After pre-processing the data, more than $35\%$ of the observations are still missing. 
+
+```{r}
+is.na(df) %>% mean()
+```
+
+We now inspect the eigen-decomposition of the correlation matrix, and we noticed that the first $25$ eigenvectors explain more than $65\%$ of the total variability; hence, we set the number of factors equal to $25$.
+
+```{r}
+cor_X <- cor(df, use = "pairwise.complete.obs")
+res <- eigen(cor_X) 
+eig_cumsum <- cumsum(res$values)/sum(res$values)
+round( eig_cumsum[25] * 100, 2 )
+```
+
+## MSGP prior
+
+We now estimate a Bayesian factor model using the MSGP prior, with with $k = 25$ latent variables. To avoid running the full sampler, we recommend reading the file *out_06_24.rds* that contains the output of the function *linearMGSP_NA* with $k= 25$. We also provide the file *out_06_24_k_5.rds* which contains the result when the number of latent variables is equal to $5$.
+
+We modified the function *linear_MSGP* contained in the *infinitefactor* package in order to deal with missing data. The details of our approach can be found in Section 5 of the paper, while the new function *linear_MSGP_NA* is contained in the file *helper_fcts.R*.
+
+
+```{r}
+k <- 25
+out <- linearMGSP_NA(log(df) %>% as.matrix() %>% scale(),
+                     nrun = 10000, burn = 5000, thin = 5,
+              kinit = k, adapt = F, output = "factSamples")
+```
+
+
+```{r}
+# out <- readRDS('data/out_06_24_k_5.rds'); k = 5
+# out <- readRDS('data/out_25.rds'); k = 25
+# out <- readRDS('data/out_40.rds'); k = 40
+# str(out, 1)
+```
+
+This file contains 1000 posterior samples for $\Lambda$ and $\eta$.
+
+```{r}
+length(out$lambdaSamps)
+dim(out$lambdaSamps[[1]])
+```
+
+
+## Post-Processing Algorithms
+
+Now we run the MatchAlign post-processing algorithm:
+
+
+```{r}
+lambdaSamps <- out$lambdaSamps
+etaSamps <- out$etaSamps
+
+start_time <- Sys.time()
+out_MatchAlign <- jointRot(lambdaSamps, etaSamps)
+end_time <- Sys.time()
+
+end_time - start_time
+```
+
+We can compare our method with rsp with partial simulated annealing. The two algorithms deal with the posterior samples of $\Lambda$ with two different data types, so we process the inputs and outputs to make them comparable.
+
+```{r}
+lambda_fact_switch <- to_fact_switching(lambdaSamps)
+
+start_time <- Sys.time()
+tmp <- quiet(rsp_partial_sa(lambda_mcmc = lambda_fact_switch, 
+                            sa_loops = 5, 
+                            verbose = F))
+end_time <- Sys.time()
+end_time - start_time
+```
+
+```{r}
+Lambda_rsp <- to_infinitefact(tmp$lambda_reordered_mcmc, k, ncol(df))
+Lambda_MatchAlign <- out_MatchAlign$lambda
+```
+
+We now compute metric (4.1): 
+\begin{align*}
+    || \overline{\Lambda\Lambda^T} - \bar \Lambda_* \bar \Lambda_* ^T ||_F
+\end{align*}
+where $\overline{\Lambda\Lambda^T} = \frac{1}{T}\sum_{t = 1}^T \Lambda^{(t)}(\Lambda^{(t)})^T$ and $\bar \Lambda_* = \frac{1}{T} \sum_{t = 1}^T \Lambda^{(t)}_*$ is the posterior mean of the aligned $\Lambda$. 
+
+
+```{r}
+# samples
+Lambda_LambdaT <- lapply(lambdaSamps, function(x) x %*% t(x))
+Lambda_LambdaT_mean <- lmean(Lambda_LambdaT)
+
+# Match Align
+LambdaAL_mean <- lmean(Lambda_MatchAlign)
+Align_cov_mean <- LambdaAL_mean %*% t(LambdaAL_mean)
+MatchAlign_norm <- norm(Align_cov_mean - Lambda_LambdaT_mean, type = "F")
+
+# rsp full 
+Align_cov <- lmean(Lambda_rsp)
+Align_cov_mean <- Align_cov %*% t(Align_cov)
+rsp_exact_norm <- norm(Align_cov_mean - Lambda_LambdaT_mean, type = "F")
+```
+
+```{r}
+c(MatchAlign = MatchAlign_norm, rsp = rsp_exact_norm)
+```
+
+```{r}
+plotmat(lmean(Lambda_rsp))
+```
+
+```{r}
+plotmat(lmean(Lambda_MatchAlign))
+```
