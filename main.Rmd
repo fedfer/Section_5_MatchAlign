@@ -26,7 +26,7 @@ In this application, we use data from the National Health and Nutrition Examinat
 
 ```{r}
 # df_chem from Rds
-df <- readRDS("data/df_chem_06_24.rds")
+df <- readRDS("data/df_chem.rds")
 dim(df)
 ```
 
@@ -51,7 +51,7 @@ round( eig_cumsum[25] * 100, 2 )
 
 ## MSGP prior
 
-We now estimate a Bayesian factor model using the MSGP prior, with with $k = 25$ latent variables. To avoid running the full sampler, we recommend reading the file *out_06_24.rds* that contains the output of the function *linearMGSP_NA* with $k= 25$. We also provide the file *out_06_24_k_5.rds* which contains the result when the number of latent variables is equal to $5$.
+We now estimate a Bayesian factor model using the MSGP prior, with with $k = 25$ latent variables. To avoid running the full sampler, we recommend reading the file *out.rds* that contains the output of the function *linearMGSP_NA* with $k= 25$. 
 
 We modified the function *linear_MSGP* contained in the *infinitefactor* package in order to deal with missing data. The details of our approach can be found in Section 5 of the paper, while the new function *linear_MSGP_NA* is contained in the file *helper_fcts.R*.
 
@@ -65,10 +65,8 @@ out <- linearMGSP_NA(log(df) %>% as.matrix() %>% scale(),
 
 
 ```{r}
-# out <- readRDS('data/out_06_24_k_5.rds'); k = 5
-# out <- readRDS('data/out_25.rds'); k = 25
-# out <- readRDS('data/out_40.rds'); k = 40
-# str(out, 1)
+out <- readRDS('data/out.rds'); k = 25
+str(out, 1)
 ```
 
 This file contains 1000 posterior samples for $\Lambda$ and $\eta$.
@@ -140,10 +138,17 @@ rsp_exact_norm <- norm(Align_cov_mean - Lambda_LambdaT_mean, type = "F")
 c(MatchAlign = MatchAlign_norm, rsp = rsp_exact_norm)
 ```
 
+We now plot the matrix of factor loadings after using MatchAlign and RSP to post-process the results. We re-arrange the rows of $\Lambda$ to make the plot easier to interpret. 
+
 ```{r}
-plotmat(lmean(Lambda_rsp))
+mLambda_plot <- lmean(Lambda_MatchAlign)
+ind_max = apply(mLambda_plot %>% abs(), 1, function(x) which(x == max(x))) %>%
+  order()
+
+plotmat(mLambda_plot[ind_max,])
 ```
 
 ```{r}
-plotmat(lmean(Lambda_MatchAlign))
+mLambda_rsp <- lmean(Lambda_rsp)
+plotmat(mLambda_rsp[ind_max,])
 ```
