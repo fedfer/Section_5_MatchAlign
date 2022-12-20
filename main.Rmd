@@ -51,7 +51,7 @@ round( eig_cumsum[25] * 100, 2 )
 
 ## MSGP prior
 
-We now estimate a Bayesian factor model using the MSGP prior, with with $k = 25$ latent variables. To avoid running the full sampler, we recommend reading the file *out.rds* that contains the output of the function *linearMGSP_NA* with $k= 25$. 
+We now estimate a Bayesian factor model using the MSGP prior, with with $k = 25$ latent variables.
 
 We modified the function *linear_MSGP* contained in the *infinitefactor* package in order to deal with missing data. The details of our approach can be found in Section 5 of the paper, while the new function *linear_MSGP_NA* is contained in the file *helper_fcts.R*.
 
@@ -65,7 +65,6 @@ out <- linearMGSP_NA(log(df) %>% as.matrix() %>% scale(),
 
 
 ```{r}
-out <- readRDS('data/out.rds'); k = 25
 str(out, 1)
 ```
 
