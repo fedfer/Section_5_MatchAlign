@@ -2,6 +2,9 @@
 title: "Section 5 MatchAlign"
 output: html_document
 date: '2022-06-24'
+editor_options: 
+  markdown: 
+    wrap: 72
 ---
 
 ```{r setup, include=FALSE}
@@ -10,134 +13,239 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ## Data
 
-We load the main packages, including the R package *infinitefactor* that we developed. 
+We load the main packages, including the R package
+$\texttt{infinitefactor}$ that we developed.
 
 ```{r, message=FALSE}
+rm(list = ls())
 set.seed(1)
 library(tidyverse)
 library(infinitefactor)
 library(coda)
 library(factor.switching)
+library(dplyr)
+```
+
+```{r}
 source("helper_fcts.R")
 ```
 
-In this application, we use data from the National Health and Nutrition Examination Survey (NHANES) collected in 2015 and 2016. We select a subset of $107$ chemical exposures for which at least $30\%$ of measurements have been recorded (i.e., are not missing). We also select a subsample of $4468$ individuals for which at least $30\%$ of the $107$ chemicals have been recorded. After this preprocessing step, we are left with a matrix $X$ of dimension $4468 \times 107$ with $36\%$ missing data.
-
+In this application, we use data from the National Health and Nutrition
+Examination Survey (NHANES) collected in 2015 and 2016. We select a
+subset of $107$ chemical exposures for which at least $30\%$ of
+measurements have been recorded (i.e., are not missing). We also select
+a subsample of $4468$ individuals for which at least $30\%$ of the $107$
+chemicals have been recorded. After this preprocessing step, we are left
+with a matrix $X$ of dimension $4468 \times 107$ with $36\%$ missing
+data.
 
 ```{r}
 # df_chem from Rds
-df <- readRDS("df_chem.rds")
+df <- readRDS("data/df_chem.rds")
 dim(df)
 ```
 
 ```{r}
-head(df)
+df[1:10,1:7]
 ```
 
-After pre-processing the data, more than $35\%$ of the observations are still missing. 
+After pre-processing the data, more than $35\%$ of the observations are
+still missing.
 
 ```{r}
 is.na(df) %>% mean()
 ```
 
-We now inspect the eigen-decomposition of the correlation matrix, and we noticed that the first $25$ eigenvectors explain more than $65\%$ of the total variability; hence, we set the number of factors equal to $25$.
+We now inspect the eigen-decomposition of the correlation matrix, and we
+noticed that the first $25$ eigenvectors explain more than $65\%$ of the
+total variability; hence, we set the number of factors equal to $k=25$.
 
 ```{r}
 cor_X <- cor(df, use = "pairwise.complete.obs")
 res <- eigen(cor_X) 
-eig_cumsum <- cumsum(res$values)/sum(res$values)
+idx_pos <- res$values>0
+eig_cumsum <- cumsum(res$values[idx_pos])/sum(res$values[idx_pos])
 round( eig_cumsum[25] * 100, 2 )
 ```
 
 ## MSGP prior
 
-We now estimate a Bayesian factor model using the MSGP prior, with with $k = 25$ latent variables.
+We now estimate a Bayesian factor model using the MSGP prior, with with
+$k = 25$ latent variables.
 
-We modified the function *linear_MSGP* contained in the *infinitefactor* package in order to deal with missing data. The details of our approach can be found in Section 5 of the paper, while the new function *linear_MSGP_NA* is contained in the file *helper_fcts.R*.
+We modified the function $\texttt{linear_MSGP}$ contained in the
+$\texttt{infinitefactor}$ package in order to deal with missing data.
+The new function $\texttt{linear_MSGP_NA}$ is contained in the file
+$\texttt{helper_fcts.R}$.
 
+Missing data inputation is straightforward in Bayesian factor model.
+Given the values of $\Lambda$, $\{\eta_i\}_{i=1}^n$, and
+$\Sigma=\text{diag}(\sigma_1^2,\dots,\sigma_p^2)$ at each iteration of
+the MCMC chain, any missing entry $X_{ij}$ is sampled as
+$$ X_{i j} \sim N(\lambda_j^\top \eta_i, \sigma_j^2) $$ where
+$\lambda_j$ is the $j^{th}$ row of $\Lambda$.
 
 ```{r}
 k <- 25
 out <- linearMGSP_NA(log(df) %>% as.matrix() %>% scale(),
-                     nrun = 10000, burn = 5000, thin = 5,
-              kinit = k, adapt = F, output = "factSamples")
+                     nrun = 10000, burn = 5000, thin = 5, 
+                     kinit = k, adapt = F, output = "factSamples")
 ```
-
-
-```{r}
-str(out, 1)
-```
-
-This file contains 1000 posterior samples for $\Lambda$ and $\eta$.
-
-```{r}
-length(out$lambdaSamps)
-dim(out$lambdaSamps[[1]])
-```
-
-
-## Post-Processing Algorithms
-
-Now we run the MatchAlign post-processing algorithm:
-
 
 ```{r}
 lambdaSamps <- out$lambdaSamps
 etaSamps <- out$etaSamps
 
-start_time <- Sys.time()
-out_MatchAlign <- jointRot(lambdaSamps, etaSamps)
-end_time <- Sys.time()
-
-end_time - start_time
-```
-
-We can compare our method with rsp with partial simulated annealing. The two algorithms deal with the posterior samples of $\Lambda$ with two different data types, so we process the inputs and outputs to make them comparable.
-
-```{r}
 lambda_fact_switch <- to_fact_switching(lambdaSamps)
-
-start_time <- Sys.time()
-tmp <- quiet(rsp_partial_sa(lambda_mcmc = lambda_fact_switch, 
-                            sa_loops = 5, 
-                            verbose = F))
-end_time <- Sys.time()
-end_time - start_time
 ```
+
+## Post-Processing Algorithms
+
+Now we run different post-processing algorithms, comparing MatchAlign
+RSP and WOP. For each method we also compute also runtimes and ESS.
+
+### WOP
 
 ```{r}
-Lambda_rsp <- to_infinitefact(tmp$lambda_reordered_mcmc, k, ncol(df))
-Lambda_MatchAlign <- out_MatchAlign$lambda
+start_time <- Sys.time()
+wop_ris <- quiet(weighted_procrustes_switching(lambda_mcmc = lambda_fact_switch, verbose = F,))
+end_time <- Sys.time()
+WOP_time <- end_time - start_time
+
+Lambda_WOP <- to_infinitefact(wop_ris$lambda_reordered_mcmc, k, ncol(df))
+
+WOP_ess <- apply(simplify2array(Lambda_WOP), c(1,2), effectiveSize) %>% mean()
 ```
 
-We now compute metric (4.1): 
-\begin{align*}
-    || \overline{\Lambda\Lambda^T} - \bar \Lambda_* \bar \Lambda_* ^T ||_F
-\end{align*}
-where $\overline{\Lambda\Lambda^T} = \frac{1}{T}\sum_{t = 1}^T \Lambda^{(t)}(\Lambda^{(t)})^T$ and $\bar \Lambda_* = \frac{1}{T} \sum_{t = 1}^T \Lambda^{(t)}_*$ is the posterior mean of the aligned $\Lambda$. 
+### RSP-full-SA
 
+```{r}
+start_time <- Sys.time()
+rspFull_ris <- quiet(rsp_full_sa(lambda_mcmc = lambda_fact_switch, sa_loops = 20, verbose = F))
+end_time <- Sys.time()
+rspFull_time = end_time - start_time
+
+Lambda_rspFull <- to_infinitefact(rspFull_ris$lambda_reordered_mcmc, k, ncol(df))
+
+rspFull_ess <- apply(simplify2array(Lambda_rspFull), c(1,2), effectiveSize) %>% mean()
+```
+
+### RSP-partial-SA
+
+```{r}
+start_time <- Sys.time()
+rspPartial_ris <- quiet(rsp_partial_sa(lambda_mcmc = lambda_fact_switch, sa_loops = 20, verbose = F))
+end_time <- Sys.time()
+rspPartial_time = end_time - start_time
+
+Lambda_rspPartial <- to_infinitefact(rspPartial_ris$lambda_reordered_mcmc, k, ncol(df))
+
+rspPartial_ess <- apply(simplify2array(Lambda_rspPartial), c(1,2), effectiveSize) %>% mean()
+```
+
+### MatchAlign
+
+```{r}
+start_time <- Sys.time()
+out_MatchAlign <- jointRot_NOnorm(lambdaSamps, etaSamps)
+end_time <- Sys.time()
+
+MatchAlign_time = end_time - start_time
+
+Lambda_MatchAlign <- out_MatchAlign$lambda
+
+MAl_ess <- apply(simplify2array(Lambda_MatchAlign), c(1,2), effectiveSize) %>% mean()
+```
+
+## Accuracy Metric
+
+We further compute the accuracy metric (3.1):
+$$ || \overline{\Lambda\Lambda^T} - \bar \Lambda_* \bar \Lambda_* ^T ||_F $$
+where
+$\overline{\Lambda\Lambda^T} = \frac{1}{T}\sum_{t = 1}^T \Lambda^{(t)}(\Lambda^{(t)})^T$
+and $\bar \Lambda_* = \frac{1}{T} \sum_{t = 1}^T \Lambda^{(t)}_*$ is the
+posterior mean of the aligned $\Lambda$.
+
+In order to give a more direct intuition of the effective benefit of
+each methodology, the metric values are expressed also as percentages of
+the relative error in the posterior mean of the covariance matrix
+$$ \frac{ || \overline{\Lambda\Lambda^T} - \bar \Lambda_* \bar \Lambda_* ^T ||_F }{|| \bar \Lambda_* \bar \Lambda_* ^T ||_F} $$
 
 ```{r}
 # samples
 Lambda_LambdaT <- lapply(lambdaSamps, function(x) x %*% t(x))
 Lambda_LambdaT_mean <- lmean(Lambda_LambdaT)
 
-# Match Align
+# Base line 
+base_norm <- norm(Lambda_LambdaT_mean, type = "F")
+
+# WOP
+Align_cov <- lmean(Lambda_WOP)
+Align_cov_mean <- Align_cov %*% t(Align_cov)
+WOP_norm <- norm(Align_cov_mean - Lambda_LambdaT_mean, type = "F")
+
+# RSP-full-SA
+Align_cov <- lmean(Lambda_rspFull)
+Align_cov_mean <- Align_cov %*% t(Align_cov)
+rspFull_norm <- norm(Align_cov_mean - Lambda_LambdaT_mean, type = "F")
+
+# RSP-partial-SA
+Align_cov <- lmean(Lambda_rspPartial)
+Align_cov_mean <- Align_cov %*% t(Align_cov)
+rspPartial_norm <- norm(Align_cov_mean - Lambda_LambdaT_mean, type = "F")
+
+# MatchAlign
 LambdaAL_mean <- lmean(Lambda_MatchAlign)
 Align_cov_mean <- LambdaAL_mean %*% t(LambdaAL_mean)
 MatchAlign_norm <- norm(Align_cov_mean - Lambda_LambdaT_mean, type = "F")
 
-# rsp full 
-Align_cov <- lmean(Lambda_rsp)
+# Unaligned
+Align_cov <- lmean(lambdaSamps)
 Align_cov_mean <- Align_cov %*% t(Align_cov)
-rsp_exact_norm <- norm(Align_cov_mean - Lambda_LambdaT_mean, type = "F")
+Unaligned_norm <- norm(Align_cov_mean - Lambda_LambdaT_mean, type = "F")
+```
+
+## Runtimes
+
+```{r}
+print('Runtimes')
+round(c(MatchAlign = MatchAlign_time, `RSP-full-SA` = rspFull_time,
+  `RSP-partial-SA` = rspPartial_time,WOP=WOP_time),3)
+```
+
+## Accuracy Metric
+
+```{r}
+print('Absolute Accuracy Metric')
+round(c(MatchAlign = MatchAlign_norm, `RSP-full-SA` = rspFull_norm,
+  `RSP-partial-SA`=rspPartial_norm, WOP=WOP_norm, Unaligned=Unaligned_norm),3)
 ```
 
 ```{r}
-c(MatchAlign = MatchAlign_norm, rsp = rsp_exact_norm)
+print('Relative Accuracy Metric')
+round(100*c(MatchAlign = MatchAlign_norm, `RSP-full-SA`=rspFull_norm,
+            `RSP-partial-SA`=rspPartial_norm, WOP=WOP_norm, Unaligned=Unaligned_norm)/base_norm,1)
 ```
 
-We now plot the matrix of factor loadings after using MatchAlign and RSP to post-process the results. We re-arrange the rows of $\Lambda$ to make the plot easier to interpret. 
+## ESS
+
+```{r}
+print('Absolute ESS')
+round(c(MatchAlign=MAl_ess, `RSP-full-SA`=rspFull_ess,
+        `RSP-partial-SA`=rspPartial_ess, WOP=WOP_ess),1)
+```
+
+```{r}
+print('Relative ESS')
+round(100*c(MatchAlign=MAl_ess, `RSP-full-SA`=rspFull_ess,
+        `RSP-partial-SA`=rspPartial_ess, WOP=WOP_ess)/length(lambdaSamps),1)
+```
+
+## Plots
+
+We now plot the matrix of factor loadings after using MatchAlign to
+post-process the results. We re-arrange the rows of $\Lambda$ to make
+the plot easier to interpret.
 
 ```{r}
 mLambda_plot <- lmean(Lambda_MatchAlign)
@@ -145,9 +253,4 @@ ind_max = apply(mLambda_plot %>% abs(), 1, function(x) which(x == max(x))) %>%
   order()
 
 plotmat(mLambda_plot[ind_max,])
-```
-
-```{r}
-mLambda_rsp <- lmean(Lambda_rsp)
-plotmat(mLambda_rsp[ind_max,])
 ```
