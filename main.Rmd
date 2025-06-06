@@ -30,9 +30,11 @@ library(dplyr)
 source("helper_fcts.R")
 ```
 
-In this application, we use data from the National Health and Nutrition
-Examination Survey (NHANES) collected in 2015 and 2016. We select a
-subset of $107$ chemical exposures for which at least $30\%$ of
+We consider here the two applications from Section 4 of the paper.
+The first concerns the measurements of $p=9$ mental ability test scores of $n=145$ seventh and eighth-grade students from the Grant-White School in Chicago (GrantWhite). 
+In the second, we use data from the National Health and Nutrition
+Examination Survey (NHANES) collected in 2015 and 2016. 
+For NHANES, we select a subset of $107$ chemical exposures for which at least $30\%$ of
 measurements have been recorded (i.e., are not missing). We also select
 a subsample of $4468$ individuals for which at least $30\%$ of the $107$
 chemicals have been recorded. After this preprocessing step, we are left
@@ -40,38 +42,55 @@ with a matrix $X$ of dimension $4468 \times 107$ with $36\%$ missing
 data.
 
 ```{r}
-# df_chem from Rds
-df <- readRDS("data/df_chem.rds")
-dim(df)
+which_data = 'GrantWhite' # %in% c('NHANES','GrantWhite')
+
+if(which_data=='NHANES'){
+  
+  df <- readRDS("data/df_chem.rds")
+  dim(df)
+
+  k <- 25
+  
+} else if (which_data=='GrantWhite'){
+  
+  df <- HolzingerSwineford1939
+  df <- df[df$school=="Grant-White",]
+  df <- df %>% select(matches("^x\\d+$"))
+  dim(df)
+
+  k <- 3
+  
+} else {
+  stop("Choose 'which_data' among c('NHANES','Grant-White')")
+}
 ```
 
 ```{r}
-df[1:10,1:7]
+head(df)
 ```
 
-After pre-processing the data, more than $35\%$ of the observations are
-still missing.
+After pre-processing the data, some of the observations might still missing (more than $35\%$ in NHANES).
 
 ```{r}
 is.na(df) %>% mean()
 ```
 
 We now inspect the eigen-decomposition of the correlation matrix, and we
-noticed that the first $25$ eigenvectors explain more than $65\%$ of the
-total variability; hence, we set the number of factors equal to $k=25$.
+noticed that the first $k$ eigenvectors explain more than $65\%$ of the
+total variability in both cases.
 
 ```{r}
 cor_X <- cor(df, use = "pairwise.complete.obs")
 res <- eigen(cor_X) 
 idx_pos <- res$values>0
 eig_cumsum <- cumsum(res$values[idx_pos])/sum(res$values[idx_pos])
-round( eig_cumsum[25] * 100, 2 )
+round( eig_cumsum[k] * 100, 2 )
 ```
 
 ## MSGP prior
 
 We now estimate a Bayesian factor model using the MSGP prior, with with
-$k = 25$ latent variables.
+$k$ latent variables.
 
 We modified the function $\texttt{linear_MSGP}$ contained in the
 $\texttt{infinitefactor}$ package in order to deal with missing data.
@@ -86,7 +105,6 @@ $$ X_{i j} \sim N(\lambda_j^\top \eta_i, \sigma_j^2) $$ where
 $\lambda_j$ is the $j^{th}$ row of $\Lambda$.
 
 ```{r}
-k <- 25
 out <- linearMGSP_NA(log(df) %>% as.matrix() %>% scale(),
                      nrun = 10000, burn = 5000, thin = 5, 
                      kinit = k, adapt = F, output = "factSamples")
