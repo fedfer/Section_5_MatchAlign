@@ -16,7 +16,7 @@ knitr::opts_chunk$set(echo = TRUE)
 We load the main packages, including the R package
 $\texttt{infinitefactor}$ that we developed.
 
-```{r, message=FALSE}
+```{r, message=FALSE, warning=FALSE}
 rm(list = ls())
 set.seed(1)
 library(tidyverse)
@@ -24,6 +24,7 @@ library(infinitefactor)
 library(coda)
 library(factor.switching)
 library(dplyr)
+library(lavaan)
 ```
 
 ```{r}
@@ -42,11 +43,11 @@ with a matrix $X$ of dimension $4468 \times 107$ with $36\%$ missing
 data.
 
 ```{r}
-which_data = 'GrantWhite' # %in% c('NHANES','GrantWhite')
+which_data = 'NHANES' # %in% c('NHANES','GrantWhite')
 
 if(which_data=='NHANES'){
   
-  df <- readRDS("data/df_chem.rds")
+  df <- readRDS("df_chem.rds")
   dim(df)
 
   k <- 25
@@ -66,10 +67,10 @@ if(which_data=='NHANES'){
 ```
 
 ```{r}
-head(df)
+df[1:10,1:7]
 ```
 
-After pre-processing the data, some of the observations might still missing (more than $35\%$ in NHANES).
+After pre-processing the data, some of the observations might still be missing (more than $35\%$ in NHANES).
 
 ```{r}
 is.na(df) %>% mean()
@@ -104,8 +105,8 @@ the MCMC chain, any missing entry $X_{ij}$ is sampled as
 $$ X_{i j} \sim N(\lambda_j^\top \eta_i, \sigma_j^2) $$ where
 $\lambda_j$ is the $j^{th}$ row of $\Lambda$.
 
-```{r}
-out <- linearMGSP_NA(log(df) %>% as.matrix() %>% scale(),
+```{r, cache=TRUE}
+out <- linearMGSP_NA(log(df) %>% as.matrix() %>% scale(), verbose = F,
                      nrun = 10000, burn = 5000, thin = 5, 
                      kinit = k, adapt = F, output = "factSamples")
 ```
@@ -137,7 +138,7 @@ WOP_ess <- apply(simplify2array(Lambda_WOP), c(1,2), effectiveSize) %>% mean()
 
 ### RSP-full-SA
 
-```{r}
+```{r, cache=TRUE}
 start_time <- Sys.time()
 rspFull_ris <- quiet(rsp_full_sa(lambda_mcmc = lambda_fact_switch, sa_loops = 20, verbose = F))
 end_time <- Sys.time()
@@ -150,7 +151,7 @@ rspFull_ess <- apply(simplify2array(Lambda_rspFull), c(1,2), effectiveSize) %>% 
 
 ### RSP-partial-SA
 
-```{r}
+```{r, cache=TRUE}
 start_time <- Sys.time()
 rspPartial_ris <- quiet(rsp_partial_sa(lambda_mcmc = lambda_fact_switch, sa_loops = 20, verbose = F))
 end_time <- Sys.time()
@@ -178,16 +179,16 @@ MAl_ess <- apply(simplify2array(Lambda_MatchAlign), c(1,2), effectiveSize) %>% m
 ## Accuracy Metric
 
 We further compute the accuracy metric (3.1):
-$$ || \overline{\Lambda\Lambda^T} - \bar \Lambda_* \bar \Lambda_* ^T ||_F $$
+$$ || \overline{\Lambda\Lambda^T \!\!}\,\, - \bar \Lambda_* \bar \Lambda_* ^T ||_F $$
 where
-$\overline{\Lambda\Lambda^T} = \frac{1}{T}\sum_{t = 1}^T \Lambda^{(t)}(\Lambda^{(t)})^T$
+$\overline{\Lambda\Lambda^T \!\!}\,\, = \frac{1}{T}\sum_{t = 1}^T \Lambda^{(t)}(\Lambda^{(t)})^T$
 and $\bar \Lambda_* = \frac{1}{T} \sum_{t = 1}^T \Lambda^{(t)}_*$ is the
 posterior mean of the aligned $\Lambda$.
 
 In order to give a more direct intuition of the effective benefit of
 each methodology, the metric values are expressed also as percentages of
 the relative error in the posterior mean of the covariance matrix
-$$ \frac{ || \overline{\Lambda\Lambda^T} - \bar \Lambda_* \bar \Lambda_* ^T ||_F }{|| \bar \Lambda_* \bar \Lambda_* ^T ||_F} $$
+$$ \frac{ || \overline{\Lambda\Lambda^T \!\!}\,\, - \bar \Lambda_* \bar \Lambda_*^T ||_F }{|| \overline{\Lambda\Lambda^T \!\!}\,\,\, ||_F} $$
 
 ```{r}
 # samples
